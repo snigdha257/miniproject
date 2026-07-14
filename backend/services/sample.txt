@@ -1,0 +1,31 @@
+Employee Onboarding Document — Acme Corp
+
+Personal Details
+----------------
+Full Name   : Rajesh Kumar
+Email       : rajesh.kumar@acmecorp.in
+Phone       : +91-98765-43210
+Date of Birth: 15 March 1990
+
+Government IDs
+--------------
+Aadhaar  : 2345 6789 0123
+PAN      : ABCDE1234F
+Passport : B1234567
+
+Financial
+---------
+Credit Card: 4539 1488 0343 6467
+
+Work Context
+------------
+Rajesh Kumar joined Infosys in Bengaluru last January. He reports to
+Priya Sharma (CEO) and collaborates with the Google Cloud team.
+The Ministry of Finance approved his deputation to New Delhi.
+
+Context Ambiguity Checks
+-------------------------
+Apple launched its M4 MacBook Pro last Tuesday at Cupertino HQ.
+I ate an apple for breakfast this morning with some juice.
+Amazon Web Services expanded its EC2 fleet across three regions.
+The Amazon river basin spans several South American countries.
