@@ -9,6 +9,7 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from database.connection import db
+from database.schema import create_user, get_user_by_email
 from routes.schemas import LoginRequest, SignupRequest, TokenResponse
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -56,7 +57,10 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise credentials_exception
 
-    user = db["users"].find_one({"email": token_data.email})
+    if not token_data.email:
+        raise credentials_exception
+
+    user = get_user_by_email(token_data.email)
     if user is None:
         raise credentials_exception
     return {"email": user["email"], "id": str(user["_id"])}
@@ -64,15 +68,14 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 
 @router.post("/signup", response_model=TokenResponse)
 async def signup(request: SignupRequest):
-    users = db["users"]
-    if users.find_one({"email": request.email}):
+    if get_user_by_email(request.email):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
     hashed_password = hash_password(request.password)
-    users.insert_one(
+    create_user(
         {
             "email": request.email,
-            "password": hashed_password,
+            "hashed_password": hashed_password,
             "created_at": datetime.utcnow(),
         }
     )
@@ -83,9 +86,8 @@ async def signup(request: SignupRequest):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(request: LoginRequest):
-    users = db["users"]
-    user = users.find_one({"email": request.email})
-    if not user or not verify_password(request.password, user["password"]):
+    user = get_user_by_email(request.email)
+    if not user or not verify_password(request.password, user["hashed_password"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     access_token = create_access_token({"sub": request.email})

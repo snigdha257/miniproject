@@ -128,6 +128,45 @@ function UploadPanel({ onResult }) {
 }
 
 function ResultsPanel({ result }) {
+  const [format, setFormat] = useState('txt')
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleDownload = async () => {
+    if (!result?.document_id) {
+      return
+    }
+
+    setError('')
+    setStatus('Preparing download…')
+    setLoading(true)
+    try {
+      const response = await api.get(`/documents/${result.document_id}/download`, {
+        params: { format },
+        responseType: 'blob',
+      })
+
+      const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/octet-stream' })
+      const contentDisposition = response.headers['content-disposition'] || ''
+      const match = contentDisposition.match(/filename="?([^";]+)"?/) 
+      const fileName = match?.[1] || `document.${format}`
+      const blobUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(blobUrl)
+      setStatus('Download started successfully.')
+    } catch (err) {
+      setError(formatApiError(err.response?.data?.detail, 'Unable to download the document.'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (!result) {
     return (
       <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 text-slate-400">
@@ -168,6 +207,28 @@ function ResultsPanel({ result }) {
           <p className="mt-2 text-xs text-slate-400">Use this key in the Unmask tab to restore the secure document.</p>
         </div>
       )}
+
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <select
+          value={format}
+          onChange={(e) => setFormat(e.target.value)}
+          className="rounded-3xl border border-slate-800 bg-slate-950 px-4 py-2 text-sm text-slate-100 outline-none"
+        >
+          <option value="txt">TXT</option>
+          <option value="docx">DOCX</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button
+          type="button"
+          onClick={handleDownload}
+          disabled={loading || !result?.document_id}
+          className="rounded-3xl bg-indigo-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? 'Preparing…' : 'Download'}
+        </button>
+      </div>
+      {status && <p className="mt-3 text-sm text-emerald-400">{status}</p>}
+      {error && <p className="mt-3 text-sm text-rose-400">{error}</p>}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <div className="rounded-3xl border border-slate-800 bg-slate-950 p-4">
@@ -252,6 +313,75 @@ function UnmaskPanel({ result, onRestored }) {
   )
 }
 
+function HistoryRow({ item }) {
+  const [format, setFormat] = useState('txt')
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleDownload = async () => {
+    setError('')
+    setStatus('Preparing download…')
+    setLoading(true)
+    try {
+      const response = await api.get(`/documents/${item.document_id}/download`, {
+        params: { format },
+        responseType: 'blob',
+      })
+
+      const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/octet-stream' })
+      const contentDisposition = response.headers['content-disposition'] || ''
+      const match = contentDisposition.match(/filename="?([^";]+)"?/) 
+      const fileName = match?.[1] || `document.${format}`
+      const blobUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(blobUrl)
+      setStatus('Download started successfully.')
+    } catch (err) {
+      setError(formatApiError(err.response?.data?.detail, 'Unable to download the document.'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <tr className="border-b border-slate-800 last:border-b-0">
+      <td className="px-4 py-4 text-slate-100">{item.filename || 'Text snippet'}</td>
+      <td className="px-4 py-4 text-slate-400">{new Date(item.created_at).toLocaleString()}</td>
+      <td className="px-4 py-4 text-slate-400">{item.mode}</td>
+      <td className="px-4 py-4 text-slate-400">{item.risk_level}</td>
+      <td className="px-4 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={format}
+            onChange={(e) => setFormat(e.target.value)}
+            className="rounded-full border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none"
+          >
+            <option value="txt">TXT</option>
+            <option value="docx">DOCX</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={loading}
+            className="rounded-full bg-indigo-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? '…' : 'Download'}
+          </button>
+        </div>
+        {status && <p className="mt-2 text-xs text-emerald-400">{status}</p>}
+        {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
+      </td>
+    </tr>
+  )
+}
+
 function HistoryPanel({ history, onRefresh }) {
   const [page, setPage] = useState(1)
 
@@ -292,16 +422,12 @@ function HistoryPanel({ history, onRefresh }) {
               <th className="border-b border-slate-800 px-4 py-3">Date</th>
               <th className="border-b border-slate-800 px-4 py-3">Mode</th>
               <th className="border-b border-slate-800 px-4 py-3">Risk</th>
+              <th className="border-b border-slate-800 px-4 py-3">Download</th>
             </tr>
           </thead>
           <tbody>
             {history.documents.map((item) => (
-              <tr key={item.document_id} className="border-b border-slate-800 last:border-b-0">
-                <td className="px-4 py-4 text-slate-100">{item.filename || 'Text snippet'}</td>
-                <td className="px-4 py-4 text-slate-400">{new Date(item.created_at).toLocaleString()}</td>
-                <td className="px-4 py-4 text-slate-400">{item.mode}</td>
-                <td className="px-4 py-4 text-slate-400">{item.risk_level}</td>
-              </tr>
+              <HistoryRow key={item.document_id} item={item} />
             ))}
           </tbody>
         </table>

@@ -1,14 +1,36 @@
 import base64
 import os
+import re
 import tempfile
 from datetime import datetime
+from io import BytesIO
 from typing import Optional
 
 from bson import ObjectId
+from docx import Document as DocxDocument
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 from pydantic import constr
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+import fitz
 
 from database.connection import db
+from database.schema import (
+    count_documents_for_user,
+    create_document,
+    create_history_entry,
+    create_mapping,
+    get_document_for_user,
+    get_documents_for_user,
+    get_mapping_by_document_id,
+    list_documents_for_user,
+    update_document,
+    update_mapping,
+)
 from routes.auth import get_current_user
 from routes.schemas import (
     DashboardResponse,
@@ -30,6 +52,94 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 
 MAX_FILE_SIZE = 5 * 1024 * 1024
 MAX_TEXT_LENGTH = 20000
+PLATFORM_NAME = "Context-Aware Sensitive Data Masking"
+
+
+def _safe_filename(document_name: Optional[str], fmt: str) -> str:
+    if document_name:
+        stem = os.path.splitext(document_name)[0] or "resume"
+        return f"{stem}_masked.{fmt}"
+    return f"resume_masked.{fmt}"
+
+
+def _build_txt_bytes(text: str) -> bytes:
+    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+
+
+def _build_docx_bytes(text: str) -> bytes:
+    document = DocxDocument()
+    style = document.styles['Normal']
+    style.font.name = 'Calibri'
+    style.font.size = 11
+
+    paragraphs = re.split(r"\n(?:\s*\n)+", text.replace("\r\n", "\n").replace("\r", "\n"))
+    for paragraph_text in paragraphs:
+        if paragraph_text.strip():
+            document.add_paragraph(paragraph_text)
+        else:
+            document.add_paragraph()
+
+    buffer = BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _build_plain_pdf_bytes(text: str) -> bytes:
+    buffer = BytesIO()
+    story = []
+    style = ParagraphStyle(name='Body', fontName='Helvetica', fontSize=10, leading=14, spaceAfter=6)
+    paragraphs = re.split(r"\n(?:\s*\n)+", text.replace("\r\n", "\n").replace("\r", "\n"))
+    for paragraph_text in paragraphs:
+        if paragraph_text.strip():
+            story.append(Paragraph(paragraph_text, style))
+        else:
+            story.append(Spacer(1, 0.2 * inch))
+
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=0.75 * inch, leftMargin=0.75 * inch, topMargin=0.75 * inch, bottomMargin=0.9 * inch)
+
+    def add_footer(canvas_obj, doc_obj):
+        canvas_obj.setFont('Helvetica', 8)
+        canvas_obj.setFillColorRGB(0.45, 0.45, 0.45)
+        canvas_obj.drawRightString(letter[0] - 0.75 * inch, 0.5 * inch, PLATFORM_NAME)
+        canvas_obj.drawString(0.75 * inch, 0.5 * inch, f"Page {doc_obj.page}")
+
+    doc.build(story, onLaterPages=add_footer, onFirstPage=add_footer)
+    return buffer.getvalue()
+
+
+def _build_redacted_pdf_bytes(file_bytes: bytes, entities: list[dict], masked_text: str) -> bytes:
+    document = fitz.open(stream=file_bytes, filetype="pdf")
+    for page in document:
+        for entity in entities:
+            entity_text = entity.get("text")
+            if not isinstance(entity_text, str) or not entity_text.strip():
+                continue
+            for rect in page.search_for(entity_text):
+                page.add_redact_annot(rect, fill=(0, 0, 0))
+        page.apply_redactions()
+
+    buffer = BytesIO()
+    document.save(buffer)
+    document.close()
+    return buffer.getvalue()
+
+
+def _build_download_bytes(document: dict, fmt: str) -> tuple[bytes, str]:
+    masked_text = document.get("maskedText") or document.get("masked_text") or document.get("originalText") or ""
+    if not isinstance(masked_text, str):
+        masked_text = str(masked_text)
+
+    if fmt == "txt":
+        return _build_txt_bytes(masked_text), "text/plain; charset=utf-8"
+    if fmt == "docx":
+        return _build_docx_bytes(masked_text), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if fmt == "pdf":
+        source_format = (document.get("source_format") or "").lower()
+        file_bytes = document.get("file_bytes")
+        if file_bytes and source_format == "pdf":
+            return _build_redacted_pdf_bytes(file_bytes, document.get("entities", []), masked_text), "application/pdf"
+        return _build_plain_pdf_bytes(masked_text), "application/pdf"
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported format.")
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
@@ -42,15 +152,19 @@ async def upload_document(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide either a file or raw text.")
 
     filename = None
+    source_format = None
+    file_bytes = None
     if file:
         filename = file.filename
         contents = await file.read()
+        file_bytes = contents
         if len(contents) == 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
         if len(contents) > MAX_FILE_SIZE:
             raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large.")
 
         suffix = os.path.splitext(filename)[1] or ".txt" # type: ignore
+        source_format = suffix.lstrip(".").lower() if suffix else "txt"
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
             tmp_file.write(contents)
             temp_path = tmp_file.name
@@ -68,19 +182,20 @@ async def upload_document(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document text is empty.")
 
     document = {
-        "owner_email": current_user["email"],
+        "user_id": current_user["id"],
         "filename": filename,
-        "raw_text": raw_text,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
+        "originalText": raw_text,
+        "maskedText": None,
+        "riskScore": None,
         "mode": None,
-        "style": None,
-        "masked_text": None,
-        "privacy_report": None,
-        "encrypted_mapping": None,
+        "privacy_report": {},
+        "source_format": source_format,
+        "file_bytes": file_bytes,
+        "entities": [],
+        "created_at": datetime.utcnow(),
     }
-    result = db["documents"].insert_one(document)
-    return {"document_id": str(result.inserted_id)}
+    document_id = create_document(document)
+    return {"document_id": str(document_id)}
 
 
 @router.post("/mask", response_model=MaskResponse)
@@ -90,7 +205,7 @@ async def mask_document(request: MaskRequest, current_user: dict = Depends(get_c
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document ID.")
 
-    document = db["documents"].find_one({"_id": document_id, "owner_email": current_user["email"]})
+    document = get_document_for_user(document_id, current_user["id"])
     if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
 
@@ -98,20 +213,22 @@ async def mask_document(request: MaskRequest, current_user: dict = Depends(get_c
         if request.style not in {"placeholder", "partial", "full"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid masking style for standard mode.")
 
-        entities = detect_text_entities(document["raw_text"])
+        original_text = document.get("originalText") or document.get("raw_text") or ""
+        if not isinstance(original_text, str):
+            original_text = str(original_text)
+        entities = detect_text_entities(original_text)
         privacy_report = analyze_privacy(entities)
-        masked_result = mask_text(document["raw_text"], entities, request.style)
+        masked_result = mask_text(original_text, entities, request.style)
         update_data = {
             "mode": request.mode,
-            "style": request.style,
-            "masked_text": masked_result["masked_text"],
+            "maskedText": masked_result["masked_text"],
+            "riskScore": privacy_report["privacy_score"],
             "privacy_report": privacy_report,
-            "encrypted_mapping": None,
-            "updated_at": datetime.utcnow(),
+            "entities": entities,
         }
-        db["documents"].update_one({"_id": document["_id"]}, {"$set": update_data})
+        update_document(document["_id"], update_data)
         return {
-            "masked_text": update_data["masked_text"],
+            "masked_text": update_data["maskedText"],
             "privacy_score": privacy_report["privacy_score"],
             "risk_level": privacy_report["risk_level"],
             "entity_counts": privacy_report["entity_counts"],
@@ -121,19 +238,28 @@ async def mask_document(request: MaskRequest, current_user: dict = Depends(get_c
         if request.style != "placeholder":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Secure mode only supports placeholder style.")
         key = generate_key()
-        masked_text, encrypted_blob = secure_mask_text(document["raw_text"], key)
-        entities = detect_text_entities(document["raw_text"])
+        original_text = document.get("originalText") or document.get("raw_text") or ""
+        if not isinstance(original_text, str):
+            original_text = str(original_text)
+        masked_text, encrypted_blob = secure_mask_text(original_text, key)
+        entities = detect_text_entities(original_text)
         privacy_report = analyze_privacy(entities)
         encoded_blob = base64.b64encode(encrypted_blob).decode("utf-8")
         update_data = {
             "mode": request.mode,
-            "style": "placeholder",
-            "masked_text": masked_text,
+            "maskedText": masked_text,
+            "riskScore": privacy_report["privacy_score"],
             "privacy_report": privacy_report,
-            "encrypted_mapping": encoded_blob,
-            "updated_at": datetime.utcnow(),
+            "entities": entities,
         }
-        db["documents"].update_one({"_id": document["_id"]}, {"$set": update_data})
+        update_document(document["_id"], update_data)
+        update_mapping(str(document["_id"]), {"encryptedMapping": encoded_blob})
+        create_history_entry({
+            "user_id": current_user["id"],
+            "document_id": str(document["_id"]),
+            "date": datetime.utcnow(),
+            "mode": request.mode,
+        })
         return {
             "masked_text": masked_text,
             "privacy_score": privacy_report["privacy_score"],
@@ -147,14 +273,18 @@ async def mask_document(request: MaskRequest, current_user: dict = Depends(get_c
 
 @router.post("/unmask", response_model=UnmaskResponse)
 async def unmask_document(request: UnmaskRequest, current_user: dict = Depends(get_current_user)):
-    document = db["documents"].find_one({"_id": ObjectId(request.document_id), "owner_email": current_user["email"]})
+    document = get_document_for_user(ObjectId(request.document_id), current_user["id"])
     if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
-    if document.get("mode") != "secure" or not document.get("encrypted_mapping"):
+    mapping = get_mapping_by_document_id(str(document["_id"]))
+    if document.get("mode") != "secure" or not mapping or not mapping.get("encryptedMapping"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document is not stored in secure mode.")
 
     try:
-        restored = secure_unmask_text(document["masked_text"], base64.b64decode(document["encrypted_mapping"]), request.key)
+        masked_text = document.get("maskedText") or document.get("masked_text") or ""
+        if not isinstance(masked_text, str):
+            masked_text = str(masked_text)
+        restored = secure_unmask_text(masked_text, base64.b64decode(mapping["encryptedMapping"]), request.key)
     except WrongKeyError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
@@ -163,7 +293,7 @@ async def unmask_document(request: UnmaskRequest, current_user: dict = Depends(g
 
 @router.get("/dashboard", response_model=DashboardResponse)
 async def dashboard(current_user: dict = Depends(get_current_user)):
-    docs = list(db["documents"].find({"owner_email": current_user["email"]}))
+    docs = get_documents_for_user(current_user["id"])
     documents_processed = len(docs)
     if documents_processed == 0:
         return {"documents_processed": 0, "average_privacy_score": 0.0, "entity_type_breakdown": {}}
@@ -183,6 +313,31 @@ async def dashboard(current_user: dict = Depends(get_current_user)):
     }
 
 
+@router.get("/{document_id}/download")
+async def download_document(
+    document_id: str,
+    format: str = Query("txt", alias="format"),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        object_id = ObjectId(document_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document ID.")
+
+    document = get_document_for_user(object_id, current_user["id"])
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+
+    fmt = (format or "txt").lower()
+    if fmt not in {"txt", "docx", "pdf"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported format.")
+
+    payload, media_type = _build_download_bytes(document, fmt)
+    filename = _safe_filename(document.get("filename"), fmt)
+    headers = {"Content-Disposition": f"attachment; filename={filename}"}
+    return Response(content=payload, media_type=media_type, headers=headers)
+
+
 @router.get("/history", response_model=HistoryResponse)
 async def history(
     current_user: dict = Depends(get_current_user),
@@ -190,11 +345,11 @@ async def history(
     page_size: int = Query(10, ge=1, le=50),
 ):
     skip = (page - 1) * page_size
-    total = db["documents"].count_documents({"owner_email": current_user["email"]})
-    cursor = db["documents"].find({"owner_email": current_user["email"]}).sort("created_at", -1).skip(skip).limit(page_size)
+    total = count_documents_for_user(current_user["id"])
+    docs = list_documents_for_user(current_user["id"], skip=skip, limit=page_size)
 
     documents = []
-    for doc in cursor:
+    for doc in docs:
         documents.append(
             {
                 "document_id": str(doc["_id"]),
