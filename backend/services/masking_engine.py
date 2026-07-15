@@ -21,7 +21,16 @@ PLACEHOLDER_LABELS = {
     "AADHAAR": "Aadhaar",
     "PAN": "PAN",
     "PASSPORT": "Passport",
+    "SSN": "SSN",
     "CREDIT_CARD": "CreditCard",
+    "IP_ADDRESS": "IPAddress",
+    "MAC_ADDRESS": "MACAddress",
+    "IBAN": "IBAN",
+    "TAX_ID": "TaxID",
+    "ROUTING_NUMBER": "RoutingNumber",
+    "VIN": "VIN",
+    "GENDER": "Gender",
+    "AGE": "Age",
 }
 
 
@@ -72,6 +81,14 @@ def _mask_entity_text(entity: Dict, mode: str) -> str:
         if label == "ORG":
             words = original.split()
             return " ".join(_mask_word(word, preserve_last=True) for word in words)
+        if label in {"SSN", "CREDIT_CARD", "IP_ADDRESS", "MAC_ADDRESS", "IBAN", "TAX_ID", "ROUTING_NUMBER", "VIN"}:
+            sep = " "
+            for char in ["-", ":", "."]:
+                if char in original:
+                    sep = char
+                    break
+            parts = original.split(sep)
+            return sep.join(_mask_word(part) for part in parts)
         return " ".join(_mask_word(word, preserve_last=False) for word in original.split())
 
     raise ValueError(f"Unknown masking mode: {mode}")
@@ -93,41 +110,78 @@ def mask_text(text: str, entities: List[Dict], mode: str) -> Dict:
     if mode not in {"placeholder", "partial", "full"}:
         raise ValueError(f"Unsupported mode: {mode}")
 
-    ordered = sorted(entities, key=lambda ent: (ent["start"], -ent["end"]))
-    output_parts: List[str] = []
-    mapping: List[Dict] = []
-    last_index = 0
+    # 1. Sort left-to-right: start ascending, end descending (longest span first)
+    sorted_left_to_right = sorted(entities, key=lambda ent: (ent["start"], -ent["end"]))
+
+    # 2. Filter out overlapping and duplicate entities (left-to-right) AND pre-calculate replacements
+    filtered_entities: List[Dict] = []
+    last_end = 0
     placeholder_counters: Dict[str, int] = {}
     placeholder_cache: Dict[Tuple[str, str], str] = {}
 
-    for entity in ordered:
+    print("\n" + "="*80)
+    print("[MASKING] Filtering overlaps and pre-calculating replacements (left-to-right):")
+    for ent in sorted_left_to_right:
+        start = ent["start"]
+        end = ent["end"]
+        if start >= last_end:
+            # Calculate replacement
+            if mode == "placeholder":
+                replacement = _make_placeholder(ent["label"].upper(), ent["text"], placeholder_counters, placeholder_cache)
+            else:
+                replacement = _mask_entity_text(ent, mode)
+            
+            # Save replacement on the entity dictionary
+            ent_copy = dict(ent)
+            ent_copy["replacement"] = replacement
+            
+            filtered_entities.append(ent_copy)
+            last_end = end
+            print(f"  - Keeping: '{ent['text']}' at {start}:{end} -> replacement: '{replacement}'")
+        else:
+            print(f"  - Skipping overlap/duplicate: '{ent['text']}' at {start}:{end} (overlaps with index < {last_end})")
+    print("="*80 + "\n")
+
+    # 3. Sort from highest start index to lowest start index (right-to-left)
+    ordered_right_to_left = sorted(filtered_entities, key=lambda ent: ent["start"], reverse=True)
+
+    current_text = text
+    mapping: List[Dict] = []
+
+    print("="*80)
+    print(f"[MASKING] Starting right-to-left replacement (mode={mode}):")
+    
+    for entity in ordered_right_to_left:
         start = entity["start"]
         end = entity["end"]
-        if start < last_index:
-            # Skip overlapping or nested entities that have already been covered.
-            continue
         if start > len(text) or end > len(text):
             raise ValueError("Entity span is out of bounds")
 
-        output_parts.append(text[last_index:start])
+        replacement = entity["replacement"]
 
-        if mode == "placeholder":
-            replacement = _make_placeholder(entity["label"].upper(), entity["text"], placeholder_counters, placeholder_cache)
-        else:
-            replacement = _mask_entity_text(entity, mode)
+        # Logging before replacement
+        print(f"  - BEFORE: Text segment at {start}:{end} is {repr(current_text[start:end])}")
+        
+        # Replace using character slice
+        current_text = current_text[:start] + replacement + current_text[end:]
+        
+        # Logging after replacement
+        print(f"    AFTER: Replaced with {repr(replacement)}")
 
-        output_parts.append(replacement)
         mapping.append({
             "original": entity["text"],
             "replacement": replacement,
             "type": entity["label"].upper(),
             "position": (start, end),
         })
-        last_index = end
 
-    output_parts.append(text[last_index:])
+    # Since we processed right-to-left, reverse the mapping list to restore left-to-right order
+    mapping.reverse()
+    print(f"[MASKING] Masking complete. Final length: {len(current_text)}")
+    print("="*80 + "\n")
+
     return {
-        "masked_text": "".join(output_parts),
+        "masked_text": current_text,
         "mapping": mapping,
     }
 

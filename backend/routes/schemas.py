@@ -33,6 +33,25 @@ class MaskRequest(BaseModel):
     document_id: str
     mode: MaskMode
     style: constr(strip_whitespace=True, min_length=1)
+    entities: Optional[List[dict]] = None
+
+
+class AnalyzeRequest(BaseModel):
+    document_id: str
+    processing_mode: constr(strip_whitespace=True, min_length=1)
+
+
+class EntityItem(BaseModel):
+    text: str
+    label: str
+    recommendMask: bool
+    reason: str
+    start: int
+    end: int
+
+
+class AnalyzeResponse(BaseModel):
+    entities: List[EntityItem]
 
 
 class MaskResponse(BaseModel):

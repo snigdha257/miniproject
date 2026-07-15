@@ -28,10 +28,50 @@ PATTERN_DEFINITIONS = [
         ),
     },
     {
+        "label": "SSN",
+        "regex": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    },
+    {
         "label": "CREDIT_CARD",
         "regex": re.compile(
-            r"\b(?:\d[ -]?){13,19}\b"
+            r"\b(?:\d{4}-\d{4}-\d{4}-\d{4}|\d{4}\s\d{4}\s\d{4}\s\d{4}|\d{13,19})\b"
         ),
+    },
+    {
+        "label": "EMAIL",
+        "regex": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+    },
+    {
+        "label": "IP_ADDRESS",
+        "regex": re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"),
+    },
+    {
+        "label": "MAC_ADDRESS",
+        "regex": re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"),
+    },
+    {
+        "label": "IBAN",
+        "regex": re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", re.IGNORECASE),
+    },
+    {
+        "label": "TAX_ID",
+        "regex": re.compile(r"\b\d{2}-\d{7}\b"),
+    },
+    {
+        "label": "ROUTING_NUMBER",
+        "regex": re.compile(r"\b\d{9}\b"),
+    },
+    {
+        "label": "VIN",
+        "regex": re.compile(r"\b[A-HJ-NPR-Z0-9]{17}\b", re.IGNORECASE),
+    },
+    {
+        "label": "GENDER",
+        "regex": re.compile(r"\b(?:male|female|non-binary|transgender)\b", re.IGNORECASE),
+    },
+    {
+        "label": "AGE",
+        "regex": re.compile(r"\b\d{1,3}\s*(?:years?\s*olds?|yo)\b", re.IGNORECASE),
     },
 ]
 

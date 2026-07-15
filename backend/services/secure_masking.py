@@ -8,7 +8,7 @@ The generated key must be saved by the caller because it cannot be recovered if 
 """
 
 import json
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -109,7 +109,7 @@ def unmask_text(masked_text: str, encrypted_mapping: Union[bytes, str], key: Uni
     return restored
 
 
-def secure_mask_text(text: str, key: Union[str, bytes]) -> Tuple[str, bytes]:
+def secure_mask_text(text: str, key: Union[str, bytes], entities: Optional[List[Dict]] = None) -> Tuple[str, bytes]:
     """
     Perform the full detection pipeline on text, mask it in placeholder mode,
     and encrypt the placeholder mapping.
@@ -117,11 +117,13 @@ def secure_mask_text(text: str, key: Union[str, bytes]) -> Tuple[str, bytes]:
     Args:
         text: Original document text.
         key: Fernet key used to encrypt the mapping.
+        entities: Optional pre-detected/pre-selected entities to mask.
 
     Returns:
         A tuple of (masked_text, encrypted_mapping_blob).
     """
-    entities = detect_text_entities(text)
+    if entities is None:
+        entities = detect_text_entities(text)
     masked_result = mask_text(text, entities, "placeholder")
     encrypted_blob = encrypt_mapping(masked_result["mapping"], key)
     return masked_result["masked_text"], encrypted_blob

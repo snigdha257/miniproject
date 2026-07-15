@@ -24,10 +24,32 @@ def detect_text_entities(text: str) -> List[Dict]:
     Returns:
         Ordered merged list of entity dictionaries.
     """
+    print("\n" + "="*80)
+    print("[PIPELINE] 1. Extracted Text Received Exactly:")
+    print(text)
+    print("="*80)
+
     ner_results = detect_ner_entities(text)
+    print(f"\n[PIPELINE] 2a. Detected NER Entities ({len(ner_results)}):")
+    for ent in ner_results:
+        print(f"  - Text: {repr(ent.get('text'))}, Type: {ent.get('label')}, Start: {ent.get('start')}, End: {ent.get('end')}")
+
     regex_results = detect_regex_patterns(text)
+    print(f"\n[PIPELINE] 2b. Detected Regex Entities ({len(regex_results)}):")
+    for ent in regex_results:
+        print(f"  - Text: {repr(ent.get('text'))}, Type: {ent.get('label')}, Start: {ent.get('start')}, End: {ent.get('end')}")
+
     context_results = detect_contextual_entities(text)
-    return merge_entities(ner_results, regex_results, context_results)
+    print(f"\n[PIPELINE] 2c. Detected Contextual Entities ({len(context_results)}):")
+    for ent in context_results:
+        print(f"  - Text: {repr(ent.get('text'))}, Type: {ent.get('label')}, Start: {ent.get('start')}, End: {ent.get('end')}")
+
+    merged = merge_entities(ner_results, regex_results, context_results)
+    print(f"\n[PIPELINE] 3. Merged Entity List ({len(merged)}):")
+    for ent in merged:
+        print(f"  - Text: {repr(ent.get('text'))}, Type: {ent.get('label')}, Start: {ent.get('start')}, End: {ent.get('end')}")
+    print("="*80 + "\n")
+    return merged
 
 
 def detect_file_entities(file_path: str) -> List[Dict]:

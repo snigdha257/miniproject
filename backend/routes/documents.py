@@ -41,12 +41,15 @@ from routes.schemas import (
     MaskResponse,
     UnmaskRequest,
     UnmaskResponse,
+    AnalyzeRequest,
+    AnalyzeResponse,
 )
 from services.extractor import extract_text
 from services.masking_engine import mask_text
 from services.pipeline import detect_text_entities
 from services.privacy_analyzer import analyze_privacy
 from services.secure_masking import generate_key, secure_mask_text, unmask_text as secure_unmask_text, WrongKeyError
+from services.groq_verifier import verify_with_groq
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
@@ -198,6 +201,42 @@ async def upload_document(
     return {"document_id": str(document_id)}
 
 
+@router.post("/analyze", response_model=AnalyzeResponse)
+async def analyze_document(request: AnalyzeRequest, current_user: dict = Depends(get_current_user)):
+    try:
+        document_id = ObjectId(request.document_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document ID.")
+
+    document = get_document_for_user(document_id, current_user["id"])
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+
+    original_text = document.get("originalText") or document.get("raw_text") or ""
+    if not isinstance(original_text, str):
+        original_text = str(original_text)
+
+    local_entities = detect_text_entities(original_text)
+
+    if request.processing_mode == "enhanced":
+        verified_entities = verify_with_groq(original_text, local_entities)
+    else:
+        verified_entities = [
+            {
+                "text": ent["text"],
+                "label": ent["label"],
+                "recommendMask": True,
+                "reason": "Detected by Standard Pipeline.",
+                "start": ent["start"],
+                "end": ent["end"]
+            }
+            for ent in local_entities
+        ]
+
+    update_document(document["_id"], {"entities": verified_entities})
+    return {"entities": verified_entities}
+
+
 @router.post("/mask", response_model=MaskResponse)
 async def mask_document(request: MaskRequest, current_user: dict = Depends(get_current_user)):
     try:
@@ -216,7 +255,12 @@ async def mask_document(request: MaskRequest, current_user: dict = Depends(get_c
         original_text = document.get("originalText") or document.get("raw_text") or ""
         if not isinstance(original_text, str):
             original_text = str(original_text)
-        entities = detect_text_entities(original_text)
+        
+        if request.entities is not None:
+            entities = request.entities
+        else:
+            entities = detect_text_entities(original_text)
+
         privacy_report = analyze_privacy(entities)
         masked_result = mask_text(original_text, entities, request.style)
         update_data = {
@@ -241,8 +285,13 @@ async def mask_document(request: MaskRequest, current_user: dict = Depends(get_c
         original_text = document.get("originalText") or document.get("raw_text") or ""
         if not isinstance(original_text, str):
             original_text = str(original_text)
-        masked_text, encrypted_blob = secure_mask_text(original_text, key)
-        entities = detect_text_entities(original_text)
+
+        if request.entities is not None:
+            entities = request.entities
+        else:
+            entities = detect_text_entities(original_text)
+
+        masked_text, encrypted_blob = secure_mask_text(original_text, key, entities=entities)
         privacy_report = analyze_privacy(entities)
         encoded_blob = base64.b64encode(encrypted_blob).decode("utf-8")
         update_data = {
