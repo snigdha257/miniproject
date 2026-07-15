@@ -23,38 +23,49 @@ _nlp = spacy.load("en_core_web_sm")
 
 # Define Custom Patterns
 money_patterns = [
-    # Prefix currency symbol/code + number
+    # Prefix currency symbol/code + number (which may have multiplier or trailing /-)
     {"label": "MONEY_PII", "pattern": [
         {"LOWER": {"IN": ["$", "₹", "rs", "inr", "usd", "£", "€"]}},
-        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr|LPA|lpa)?$"}}
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr|LPA|lpa)?(?:/-)?$"}}
     ]},
-    # Prefix with dot + number
+    # Prefix with dot + number (which may have multiplier or trailing /-)
     {"label": "MONEY_PII", "pattern": [
         {"LOWER": "rs"},
         {"ORTH": "."},
-        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr|LPA|lpa)?$"}}
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr|LPA|lpa)?(?:/-)?$"}}
     ]},
     # Number + suffix currency symbol/code
     {"label": "MONEY_PII", "pattern": [
-        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr)?$"}},
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr)?(?:/-)?$"}},
         {"LOWER": {"IN": ["usd", "inr", "lpa", "crpa", "lakhs", "crores", "$", "₹", "£", "€"]}}
     ]},
     # Prefix + number + suffix
     {"label": "MONEY_PII", "pattern": [
         {"LOWER": {"IN": ["$", "₹", "rs", "inr", "usd", "£", "€"]}},
         {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr)?$"}},
-        {"LOWER": {"IN": ["usd", "inr", "lpa", "crpa", "lakhs", "crores"]}}
+        {"LOWER": {"IN": ["usd", "inr", "lpa", "crpa", "lakhs", "crores", "/-"]}}
     ]},
     # Prefix + dot + number + suffix
     {"label": "MONEY_PII", "pattern": [
         {"LOWER": "rs"},
         {"ORTH": "."},
         {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr)?$"}},
-        {"LOWER": {"IN": ["usd", "inr", "lpa", "crpa", "lakhs", "crores"]}}
+        {"LOWER": {"IN": ["usd", "inr", "lpa", "crpa", "lakhs", "crores", "/-"]}}
     ]},
-    # Multiplier only
+    # Multiplier or trailing /- only
     {"label": "MONEY_PII", "pattern": [
-        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kK]|[lL]|[cC]r|[lL]PA|[lL]pa)$"}}
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kK]|[lL]|[cC]r|[lL]PA|[lL]pa|/-)$"}}
+    ]},
+    # Number followed by separate /- token
+    {"label": "MONEY_PII", "pattern": [
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr)?$"}},
+        {"ORTH": "/-"}
+    ]},
+    # Number followed by separate / and - tokens
+    {"label": "MONEY_PII", "pattern": [
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr)?$"}},
+        {"ORTH": "/"},
+        {"ORTH": "-"}
     ]}
 ]
 
