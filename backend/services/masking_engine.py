@@ -31,6 +31,9 @@ PLACEHOLDER_LABELS = {
     "VIN": "VIN",
     "GENDER": "Gender",
     "AGE": "Age",
+    "MONEY_PII": "Money",
+    "EMPLOYEE_ID": "EmployeeID",
+    "PHONE_NUMBER": "Phone",
 }
 
 
@@ -81,7 +84,7 @@ def _mask_entity_text(entity: Dict, mode: str) -> str:
         if label == "ORG":
             words = original.split()
             return " ".join(_mask_word(word, preserve_last=True) for word in words)
-        if label in {"SSN", "CREDIT_CARD", "IP_ADDRESS", "MAC_ADDRESS", "IBAN", "TAX_ID", "ROUTING_NUMBER", "VIN"}:
+        if label in {"SSN", "CREDIT_CARD", "IP_ADDRESS", "MAC_ADDRESS", "IBAN", "TAX_ID", "ROUTING_NUMBER", "VIN", "EMPLOYEE_ID", "PHONE_NUMBER"}:
             sep = " "
             for char in ["-", ":", "."]:
                 if char in original:

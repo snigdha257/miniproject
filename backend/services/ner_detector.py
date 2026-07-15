@@ -8,6 +8,12 @@ pay no startup cost — critical for request-time performance.
 """
 
 import spacy
+from spacy.pipeline import EntityRuler
+from spacy.tokens import Span
+
+# Register custom extension attribute on Spans to hold the context priority flag.
+if not Span.has_extension("is_high_priority"):
+    Span.set_extension("is_high_priority", default=False)
 
 # ---------------------------------------------------------------------------
 # Module-level model load — do NOT move this inside detect_entities().
@@ -15,8 +21,151 @@ import spacy
 # ---------------------------------------------------------------------------
 _nlp = spacy.load("en_core_web_sm")
 
+# Define Custom Patterns
+money_patterns = [
+    # Prefix currency symbol/code + number
+    {"label": "MONEY_PII", "pattern": [
+        {"LOWER": {"IN": ["$", "₹", "rs", "inr", "usd", "£", "€"]}},
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr|LPA|lpa)?$"}}
+    ]},
+    # Prefix with dot + number
+    {"label": "MONEY_PII", "pattern": [
+        {"LOWER": "rs"},
+        {"ORTH": "."},
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr|LPA|lpa)?$"}}
+    ]},
+    # Number + suffix currency symbol/code
+    {"label": "MONEY_PII", "pattern": [
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr)?$"}},
+        {"LOWER": {"IN": ["usd", "inr", "lpa", "crpa", "lakhs", "crores", "$", "₹", "£", "€"]}}
+    ]},
+    # Prefix + number + suffix
+    {"label": "MONEY_PII", "pattern": [
+        {"LOWER": {"IN": ["$", "₹", "rs", "inr", "usd", "£", "€"]}},
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr)?$"}},
+        {"LOWER": {"IN": ["usd", "inr", "lpa", "crpa", "lakhs", "crores"]}}
+    ]},
+    # Prefix + dot + number + suffix
+    {"label": "MONEY_PII", "pattern": [
+        {"LOWER": "rs"},
+        {"ORTH": "."},
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kKlL]|cr|Cr)?$"}},
+        {"LOWER": {"IN": ["usd", "inr", "lpa", "crpa", "lakhs", "crores"]}}
+    ]},
+    # Multiplier only
+    {"label": "MONEY_PII", "pattern": [
+        {"TEXT": {"REGEX": r"^\d+(?:,\d+)*(?:\.\d+)?(?:[kK]|[lL]|[cC]r|[lL]PA|[lL]pa)$"}}
+    ]}
+]
+
+employee_patterns = [
+    # Single token variant (EMP-40218, EMP40218, etc.)
+    {"label": "EMPLOYEE_ID", "pattern": [
+        {"TEXT": {"REGEX": r"(?i)^(?:EMP|E|STAFF|ID)[-\.\s]?\d+$"}}
+    ]},
+    # Hash format
+    {"label": "EMPLOYEE_ID", "pattern": [
+        {"ORTH": "#"},
+        {"TEXT": {"REGEX": r"^\d+$"}}
+    ]},
+    # Multi-token with hyphen, dot, or space separator
+    {"label": "EMPLOYEE_ID", "pattern": [
+        {"LOWER": {"IN": ["emp", "e", "staff", "id"]}},
+        {"ORTH": {"IN": ["-", ".", " "]}},
+        {"TEXT": {"REGEX": r"^\d+$"}}
+    ]},
+    # Multi-token space separation
+    {"label": "EMPLOYEE_ID", "pattern": [
+        {"LOWER": {"IN": ["emp", "e", "staff", "id"]}},
+        {"TEXT": {"REGEX": r"^\d+$"}}
+    ]}
+]
+
+phone_patterns = [
+    # US format (Single token)
+    {"label": "PHONE_NUMBER", "pattern": [
+        {"TEXT": {"REGEX": r"^(?:\d{10}|\d{3}\.\d{3}\.\d{4})$"}}
+    ]},
+    # US format with hyphens
+    {"label": "PHONE_NUMBER", "pattern": [
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"ORTH": "-"},
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"ORTH": "-"},
+        {"TEXT": {"REGEX": r"^\d{4}$"}}
+    ]},
+    # US format with parentheses
+    {"label": "PHONE_NUMBER", "pattern": [
+        {"ORTH": "("},
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"ORTH": ")"},
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"ORTH": "-"},
+        {"TEXT": {"REGEX": r"^\d{4}$"}}
+    ]},
+    # International with spaces
+    {"label": "PHONE_NUMBER", "pattern": [
+        {"TEXT": {"REGEX": r"^\+\d{1,4}$"}},
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"TEXT": {"REGEX": r"^\d{4}$"}}
+    ]},
+    # International with 5-5 split
+    {"label": "PHONE_NUMBER", "pattern": [
+        {"TEXT": {"REGEX": r"^\+\d{1,4}$"}},
+        {"TEXT": {"REGEX": r"^\d{5}$"}},
+        {"TEXT": {"REGEX": r"^\d{5}$"}}
+    ]},
+    # International with hyphens
+    {"label": "PHONE_NUMBER", "pattern": [
+        {"TEXT": {"REGEX": r"^\+\d{1,4}$"}},
+        {"ORTH": "-"},
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"ORTH": "-"},
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"ORTH": "-"},
+        {"TEXT": {"REGEX": r"^\d{4}$"}}
+    ]},
+    # International with parentheses
+    {"label": "PHONE_NUMBER", "pattern": [
+        {"TEXT": {"REGEX": r"^\+\d{1,4}$"}},
+        {"ORTH": "("},
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"ORTH": ")"},
+        {"TEXT": {"REGEX": r"^\d{3}$"}},
+        {"ORTH": "-"},
+        {"TEXT": {"REGEX": r"^\d{4}$"}}
+    ]}
+]
+
+# Add EntityRuler BEFORE NER
+_ruler = _nlp.add_pipe("entity_ruler", before="ner")
+_ruler.add_patterns(money_patterns + employee_patterns + phone_patterns)
+
+# Context priority bumping component
+@spacy.Language.component("priority_bumper")
+def priority_bumper(doc):
+    priority_keywords = {
+        "salary", "comp", "ctc", "pay", "paid", "package", 
+        "compensation", "wages", "earns", "offered", "bonus"
+    }
+    for ent in doc.ents:
+        if ent.label_ == "MONEY_PII":
+            start_idx = max(0, ent.start - 5)
+            end_idx = min(len(doc), ent.end + 5)
+            surrounding_tokens = [
+                doc[i].lower_ for i in range(start_idx, end_idx) 
+                if i < ent.start or i >= ent.end
+            ]
+            if any(kw in surrounding_tokens for kw in priority_keywords):
+                ent._.is_high_priority = True
+                print(f"[PIPELINE][BUMP] High-priority MONEY_PII detected: '{ent.text}' (salary context matched nearby)")
+    return doc
+
+# Add priority bumper AFTER NER
+_nlp.add_pipe("priority_bumper", after="ner")
+
 # Entity labels we treat as potentially sensitive.
-# spaCy label reference: https://spacy.io/models/en#en_core_web_sm-labels
 SENSITIVE_LABELS = {
     "PERSON",   # People, including fictional
     "ORG",      # Companies, agencies, institutions
@@ -24,9 +173,12 @@ SENSITIVE_LABELS = {
     "LOC",      # Non-GPE locations (mountains, rivers, etc.)
     "NORP",     # Nationalities, religious or political groups
     "FAC",      # Buildings, airports, highways, bridges, etc.
-    "EMAIL",    # Email addresses (spaCy 3.x detects these in some pipelines)
+    "EMAIL",    # Email addresses
     "MONEY",    # Monetary values
     "DATE",     # Absolute or relative dates / periods
+    "MONEY_PII",    # Custom high-precision Money/Salary detection
+    "EMPLOYEE_ID",  # Custom Employee ID detection
+    "PHONE_NUMBER", # Custom Phone Number detection
 }
 
 
@@ -52,18 +204,22 @@ def detect_entities(text: str) -> list[dict]:
         text: Plain text string.
 
     Returns:
-        List of dicts with keys: text, label, start, end.
+        List of dicts with keys: text, label, start, end, is_high_priority.
     """
     normalized_text = _normalize_text_for_ner(text)
     doc = _nlp(normalized_text)
     results = []
     for ent in doc.ents:
         if ent.label_ in SENSITIVE_LABELS:
+            is_high = False
+            if ent.label_ == "MONEY_PII" and hasattr(ent._, "is_high_priority"):
+                is_high = ent._.is_high_priority
             results.append({
                 "text": ent.text.strip(),
                 "label": ent.label_,
                 "start": ent.start_char,
                 "end": ent.end_char,
+                "is_high_priority": is_high,
             })
     return results
 

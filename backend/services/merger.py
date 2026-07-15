@@ -47,12 +47,13 @@ def merge_entities(
 
     for ent in ner_res:
         if not is_suppressed(ent["start"], ent["end"]):
+            priority = 2.5 if ent.get("label") in {"MONEY_PII", "EMPLOYEE_ID", "PHONE_NUMBER"} else 1
             candidates.append({
                 "text": ent["text"],
                 "label": ent["label"],
                 "start": ent["start"],
                 "end": ent["end"],
-                "priority": 1
+                "priority": priority
             })
 
     for ent in regex_res:
