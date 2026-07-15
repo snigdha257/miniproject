@@ -6,8 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BACKEND_DIR)
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
+    sys.path.append(ROOT_DIR)
 
 dotenv_path = os.path.join(BACKEND_DIR, ".env")
 load_dotenv(dotenv_path)

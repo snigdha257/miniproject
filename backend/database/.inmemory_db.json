@@ -1,0 +1,13 @@
+{
+  "users": [
+    {
+      "email": "persistent_user@example.com",
+      "hashed_password": "$bcrypt-sha256$v=2,t=2b,r=12$Cs8VmEsk7U97m44SlhifKu$4Sp5mUd7xU.SP9TnzO3Woqo0mESm1Se",
+      "created_at": "2026-07-15 07:23:52.713412",
+      "_id": "6a573588e28fdcf18f30a64a"
+    }
+  ],
+  "documents": [],
+  "mappings": [],
+  "history": []
+}

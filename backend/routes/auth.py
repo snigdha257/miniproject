@@ -87,7 +87,11 @@ async def signup(request: SignupRequest):
 @router.post("/login", response_model=TokenResponse)
 async def login(request: LoginRequest):
     user = get_user_by_email(request.email)
-    if not user or not verify_password(request.password, user["hashed_password"]):
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    hashed_password = user.get("hashed_password") or user.get("password")
+    if not hashed_password or not verify_password(request.password, hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     access_token = create_access_token({"sub": request.email})

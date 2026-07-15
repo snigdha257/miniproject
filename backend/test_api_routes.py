@@ -44,10 +44,18 @@ class InMemoryCollection:
 
         return Result()
 
-    def update_one(self, filter_query, update):
+    def update_one(self, filter_query, update, upsert=False):
         doc = self.find_one(filter_query)
         if not doc:
-            return None
+            doc = filter_query.copy()
+            if "$set" in update:
+                doc.update(update["$set"])
+            self.insert_one(doc)
+            class Result:
+                matched_count = 0
+                modified_count = 0
+                upserted_id = doc.get("_id")
+            return Result()
         if "$set" in update:
             doc.update(update["$set"])
 
@@ -90,6 +98,8 @@ class FakeDB:
     def __init__(self):
         self.users = InMemoryCollection()
         self.documents = InMemoryCollection()
+        self.mappings = InMemoryCollection()
+        self.history = InMemoryCollection()
 
     def __getitem__(self, name):
         return getattr(self, name)
@@ -98,6 +108,7 @@ class FakeDB:
 fake_db = FakeDB()
 
 fake_database_module = types.ModuleType("database")
+fake_database_module.__path__ = [os.path.join(os.getcwd(), "database")]
 fake_connection_module = types.ModuleType("database.connection")
 fake_connection_module.db = fake_db
 sys.modules["database"] = fake_database_module
