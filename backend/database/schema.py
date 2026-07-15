@@ -107,7 +107,7 @@ def get_mapping_by_document_id(document_id: Any) -> Optional[Dict[str, Any]]:
 
 
 def update_mapping(document_id: Any, updates: Dict[str, Any]) -> None:
-    _collection("mappings").update_one({"document_id": document_id}, {"$set": updates})
+    _collection("mappings").update_one({"document_id": document_id}, {"$set": updates}, upsert=True)
 
 
 def delete_mapping(document_id: Any) -> None:

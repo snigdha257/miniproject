@@ -167,19 +167,24 @@ class InMemoryClient:
 def get_mongo_client() -> Any:
     uri = os.getenv("MONGO_URI")
     if not uri:
-        print("[WARNING] MONGO_URI is not set. Falling back to in-memory database for local testing.")
+        # Default to file-based in-memory database for persistence
+        storage_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".inmemory_db.json")
+        os.environ["MEMORY_DB_PATH"] = storage_path
+        print("[INFO] MONGO_URI not set, using file-based in-memory database for persistence.")
+        print(f"[INFO] Database will be stored at: {storage_path}")
         return InMemoryClient()
-
+    
     try:
         client = MongoClient(uri, serverSelectionTimeoutMS=5000)
         client.admin.command("ping")
         print("[DB] MongoDB connection established successfully.")
         return client
     except (ConnectionFailure, ConfigurationError) as exc:
-        sys.exit(
-            f"\n[ERROR] Could not connect to MongoDB: {exc}\n"
-            "  Check that MONGO_URI is correct and your IP is whitelisted in Atlas.\n"
-        )
+        print(f"[WARNING] Could not connect to MongoDB: {exc}")
+        print("[WARNING] Falling back to file-based in-memory database for persistence.")
+        storage_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".inmemory_db.json")
+        os.environ["MEMORY_DB_PATH"] = storage_path
+        return InMemoryClient()
 
 
 client = get_mongo_client()

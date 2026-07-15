@@ -322,20 +322,43 @@ async def mask_document(request: MaskRequest, current_user: dict = Depends(get_c
 
 @router.post("/unmask", response_model=UnmaskResponse)
 async def unmask_document(request: UnmaskRequest, current_user: dict = Depends(get_current_user)):
+    print(f"[DEBUG] Unmask request: document_id={request.document_id}, key={request.key[:20]}...")
+    print(f"[DEBUG] Current user: {current_user.get('id')}")
+    
     document = get_document_for_user(ObjectId(request.document_id), current_user["id"])
+    print(f"[DEBUG] Retrieved document: {document is not None}")
+    if document:
+        print(f"[DEBUG] Document mode: {document.get('mode')}")
+        print(f"[DEBUG] Document has maskedText: {bool(document.get('maskedText'))}")
+    
     if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    
     mapping = get_mapping_by_document_id(str(document["_id"]))
+    print(f"[DEBUG] Retrieved mapping: {mapping is not None}")
+    if mapping:
+        print(f"[DEBUG] Mapping has encryptedMapping: {bool(mapping.get('encryptedMapping'))}")
+    
     if document.get("mode") != "secure" or not mapping or not mapping.get("encryptedMapping"):
+        print(f"[DEBUG] Unmask failed - mode={document.get('mode')}, mapping={bool(mapping)}, encryptedMapping={bool(mapping.get('encryptedMapping')) if mapping else False}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document is not stored in secure mode.")
 
     try:
         masked_text = document.get("maskedText") or document.get("masked_text") or ""
         if not isinstance(masked_text, str):
             masked_text = str(masked_text)
+        print(f"[DEBUG] Masked text length: {len(masked_text)}")
+        print(f"[DEBUG] Encrypted blob length: {len(mapping['encryptedMapping'])}")
         restored = secure_unmask_text(masked_text, base64.b64decode(mapping["encryptedMapping"]), request.key)
+        print(f"[DEBUG] Restored text length: {len(restored)}")
     except WrongKeyError as exc:
+        print(f"[DEBUG] WrongKeyError: {exc}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        print(f"[DEBUG] Unexpected error: {type(exc).__name__}: {exc}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
     return {"restored_text": restored}
 

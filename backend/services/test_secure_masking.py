@@ -1,5 +1,9 @@
 import pytest
-
+import sys
+import os
+backend_dir = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, backend_dir)
+sys.path.insert(0, os.path.join(backend_dir, 'services'))
 from secure_masking import WrongKeyError, decrypt_mapping, encrypt_mapping, generate_key, secure_mask_text, unmask_text
 
 

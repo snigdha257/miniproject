@@ -64,7 +64,7 @@ class MaskResponse(BaseModel):
 
 class UnmaskRequest(BaseModel):
     document_id: str
-    key: str = Field(..., min_length=44, max_length=44)
+    key: str
 
 
 class UnmaskResponse(BaseModel):

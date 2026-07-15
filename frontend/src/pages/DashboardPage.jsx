@@ -431,6 +431,24 @@ function ResultsPanel({ result }) {
 
   const entityCounts = result.entity_counts ?? {}
 
+  // Handle case when result comes from history (no masked_text initially)
+  if (!result.masked_text && !result.restored_text) {
+    return (
+      <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-white">Results</h2>
+            <p className="mt-2 text-sm text-slate-400">Document selected from history. Use the Unmask tab to restore secure documents.</p>
+          </div>
+        </div>
+        <div className="mt-4 rounded-3xl border border-slate-800 bg-slate-950 p-3">
+          <p className="text-xs text-slate-400">Document ID: {result.document_id}</p>
+          <p className="text-xs text-slate-400">Mode: {result.mode || 'Unknown'}</p>
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -484,23 +502,25 @@ function ResultsPanel({ result }) {
       {status && <p className="mt-3 text-sm text-emerald-400">{status}</p>}
       {error && <p className="mt-3 text-sm text-rose-400">{error}</p>}
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-3xl border border-slate-800 bg-slate-950 p-4">
-          <h3 className="text-sm uppercase tracking-[0.2em] text-slate-400">Masked text</h3>
-          <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm text-slate-100">{result.masked_text}</pre>
-        </div>
-        <div className="rounded-3xl border border-slate-800 bg-slate-950 p-4">
-          <h3 className="text-sm uppercase tracking-[0.2em] text-slate-400">Entity counts</h3>
-          <div className="mt-3 space-y-2">
-            {Object.entries(entityCounts).map(([label, count]) => (
-              <div key={label} className="flex items-center justify-between rounded-2xl bg-slate-900 px-4 py-3 text-sm text-slate-200">
-                <span>{label}</span>
-                <span className="font-semibold">{count}</span>
-              </div>
-            ))}
+      {result.masked_text && (
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-3xl border border-slate-800 bg-slate-950 p-4">
+            <h3 className="text-sm uppercase tracking-[0.2em] text-slate-400">Masked text</h3>
+            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm text-slate-100">{result.masked_text}</pre>
+          </div>
+          <div className="rounded-3xl border border-slate-800 bg-slate-950 p-4">
+            <h3 className="text-sm uppercase tracking-[0.2em] text-slate-400">Entity counts</h3>
+            <div className="mt-3 space-y-2">
+              {Object.entries(entityCounts).map(([label, count]) => (
+                <div key={label} className="flex items-center justify-between rounded-2xl bg-slate-900 px-4 py-3 text-sm text-slate-200">
+                  <span>{label}</span>
+                  <span className="font-semibold">{count}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
       {result.restored_text && (
         <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950 p-4 text-slate-100">
           <h3 className="text-sm uppercase tracking-[0.2em] text-slate-400">Restored text</h3>
@@ -533,10 +553,10 @@ function UnmaskPanel({ result, onRestored }) {
     }
   }
 
-  if (!result?.mode || result.mode !== 'secure') {
+  if (!result?.document_id) {
     return (
       <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 text-slate-400">
-        Upload a secure-mode document to enable unmasking.
+        Select a secure-mode document from the History tab to enable unmasking.
       </div>
     )
   }
@@ -545,6 +565,10 @@ function UnmaskPanel({ result, onRestored }) {
     <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
       <h2 className="text-xl font-semibold text-white">Secure Unmask</h2>
       <p className="mt-2 text-sm text-slate-400">Enter the key to restore your secure masked document.</p>
+      <div className="mt-4 rounded-3xl border border-slate-800 bg-slate-950 p-3">
+        <p className="text-xs text-slate-400">Document ID: {result.document_id}</p>
+        <p className="text-xs text-slate-400">Mode: {result.mode || 'Unknown'}</p>
+      </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-[1.5fr_auto]">
         <input
           type="text"
@@ -567,7 +591,7 @@ function UnmaskPanel({ result, onRestored }) {
   )
 }
 
-function HistoryRow({ item }) {
+function HistoryRow({ item, onUnmask }) {
   const [format, setFormat] = useState('txt')
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
@@ -603,6 +627,10 @@ function HistoryRow({ item }) {
     }
   }
 
+  const handleUnmaskClick = () => {
+    onUnmask(item)
+  }
+
   return (
     <tr className="border-b border-slate-800 last:border-b-0">
       <td className="px-4 py-4 text-slate-100">{item.filename || 'Text snippet'}</td>
@@ -611,6 +639,15 @@ function HistoryRow({ item }) {
       <td className="px-4 py-4 text-slate-400">{item.risk_level}</td>
       <td className="px-4 py-4">
         <div className="flex flex-wrap items-center gap-2">
+          {item.mode === 'secure' && (
+            <button
+              type="button"
+              onClick={handleUnmaskClick}
+              className="rounded-full bg-emerald-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-400"
+            >
+              Unmask
+            </button>
+          )}
           <select
             value={format}
             onChange={(e) => setFormat(e.target.value)}
@@ -636,7 +673,7 @@ function HistoryRow({ item }) {
   )
 }
 
-function HistoryPanel({ history, onRefresh }) {
+function HistoryPanel({ history, onRefresh, onUnmask }) {
   const [page, setPage] = useState(1)
 
   useEffect(() => {
@@ -676,12 +713,12 @@ function HistoryPanel({ history, onRefresh }) {
               <th className="border-b border-slate-800 px-4 py-3">Date</th>
               <th className="border-b border-slate-800 px-4 py-3">Mode</th>
               <th className="border-b border-slate-800 px-4 py-3">Risk</th>
-              <th className="border-b border-slate-800 px-4 py-3">Download</th>
+              <th className="border-b border-slate-800 px-4 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
             {history.documents.map((item) => (
-              <HistoryRow key={item.document_id} item={item} />
+              <HistoryRow key={item.document_id} item={item} onUnmask={onUnmask} />
             ))}
           </tbody>
         </table>
@@ -717,6 +754,17 @@ export default function DashboardPage() {
     setHistory(response.data)
   }, [])
 
+  const handleHistoryUnmask = useCallback((item) => {
+    // Set the result to the history item for unmasking
+    setResult({
+      document_id: item.document_id,
+      mode: item.mode,
+      masked_text: null, // Will be fetched from backend
+    })
+    // Switch to Unmask tab
+    setActiveTab('Unmask')
+  }, [])
+
   const resultWithRestored = useMemo(
     () => (result ? { ...result, restored_text: restoredText || result.restored_text } : result),
     [result, restoredText],
@@ -743,7 +791,7 @@ export default function DashboardPage() {
         {activeTab === 'Upload & Mask' && <UploadPanel onResult={setResult} />}
         {activeTab === 'Results' && <ResultsPanel result={resultWithRestored} />}
         {activeTab === 'Unmask' && <UnmaskPanel result={result} onRestored={setRestoredText} />}
-        {activeTab === 'History' && <HistoryPanel history={history} onRefresh={refreshHistory} />}
+        {activeTab === 'History' && <HistoryPanel history={history} onRefresh={refreshHistory} onUnmask={handleHistoryUnmask} />}
       </div>
     </DashboardLayout>
   )
