@@ -72,8 +72,8 @@ def _build_txt_bytes(text: str) -> bytes:
 def _build_docx_bytes(text: str) -> bytes:
     document = DocxDocument()
     style = document.styles['Normal']
-    style.font.name = 'Calibri'
-    style.font.size = 11
+    style.font.name = 'Calibri' # type: ignore
+    style.font.size = 11 # type: ignore
 
     paragraphs = re.split(r"\n(?:\s*\n)+", text.replace("\r\n", "\n").replace("\r", "\n"))
     for paragraph_text in paragraphs:
@@ -128,9 +128,13 @@ def _build_redacted_pdf_bytes(file_bytes: bytes, entities: list[dict], masked_te
 
 
 def _build_download_bytes(document: dict, fmt: str) -> tuple[bytes, str]:
-    masked_text = document.get("maskedText") or document.get("masked_text") or document.get("originalText") or ""
+    original_text = document.get("originalText") or document.get("raw_text") or ""
+    masked_text = document.get("maskedText") or document.get("masked_text") or original_text or ""
     if not isinstance(masked_text, str):
         masked_text = str(masked_text)
+
+    # Check if document has been restored (unmasked) - when maskedText equals originalText
+    is_restored = masked_text == original_text and original_text
 
     if fmt == "txt":
         return _build_txt_bytes(masked_text), "text/plain; charset=utf-8"
@@ -140,6 +144,10 @@ def _build_download_bytes(document: dict, fmt: str) -> tuple[bytes, str]:
         source_format = (document.get("source_format") or "").lower()
         file_bytes = document.get("file_bytes")
         if file_bytes and source_format == "pdf":
+            # If restored (unmasked), return original PDF without redaction
+            if is_restored:
+                return file_bytes, "application/pdf"
+            # If masked, return redacted PDF with entities masked
             return _build_redacted_pdf_bytes(file_bytes, document.get("entities", []), masked_text), "application/pdf"
         return _build_plain_pdf_bytes(masked_text), "application/pdf"
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported format.")
@@ -359,6 +367,9 @@ async def unmask_document(request: UnmaskRequest, current_user: dict = Depends(g
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    # Store the restored text back to the document so download returns the unmasked version
+    update_document(document["_id"], {"maskedText": restored})
 
     return {"restored_text": restored}
 

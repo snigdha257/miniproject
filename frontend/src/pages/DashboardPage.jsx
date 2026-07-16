@@ -535,6 +535,9 @@ function UnmaskPanel({ result, onRestored }) {
   const [key, setKey] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
+  const [restoredText, setRestoredText] = useState('')
+  const [downloadFormat, setDownloadFormat] = useState('txt')
+  const [downloadLoading, setDownloadLoading] = useState(false)
 
   const handleUnmask = async () => {
     setMessage('')
@@ -544,12 +547,42 @@ function UnmaskPanel({ result, onRestored }) {
         document_id: result.document_id,
         key,
       })
+      setRestoredText(response.data.restored_text)
       onRestored(response.data.restored_text)
       setMessage('Restored successfully.')
     } catch (err) {
       setMessage(formatApiError(err.response?.data?.detail, 'Unable to unmask with that key.'))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDownloadRestored = async () => {
+    setMessage('')
+    setDownloadLoading(true)
+    try {
+      const response = await api.get(`/documents/${result.document_id}/download`, {
+        params: { format: downloadFormat },
+        responseType: 'blob',
+      })
+
+      const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/octet-stream' })
+      const contentDisposition = response.headers['content-disposition'] || ''
+      const match = contentDisposition.match(/filename="?([^";]+)"?/)
+      const fileName = match?.[1] || `restored.${downloadFormat}`
+      const blobUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(blobUrl)
+      setMessage('Download started successfully.')
+    } catch (err) {
+      setMessage(formatApiError(err.response?.data?.detail, 'Unable to download the restored document.'))
+    } finally {
+      setDownloadLoading(false)
     }
   }
 
@@ -587,6 +620,36 @@ function UnmaskPanel({ result, onRestored }) {
         </button>
       </div>
       {message && <p className="mt-4 text-sm text-slate-300">{message}</p>}
+      
+      {restoredText && (
+        <div className="mt-6 space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-300">Restored Document:</h3>
+            <div className="mt-2 max-h-64 overflow-y-auto rounded-3xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400">
+              {restoredText}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <select
+              value={downloadFormat}
+              onChange={(e) => setDownloadFormat(e.target.value)}
+              className="rounded-full border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none"
+            >
+              <option value="txt">TXT</option>
+              <option value="docx">DOCX</option>
+              <option value="pdf">PDF</option>
+            </select>
+            <button
+              type="button"
+              onClick={handleDownloadRestored}
+              disabled={downloadLoading}
+              className="rounded-3xl bg-emerald-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {downloadLoading ? 'Downloading…' : 'Download Restored'}
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
